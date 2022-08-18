@@ -2,7 +2,7 @@
 /*
 * thumbnail is project to extract information from database(db)
 * db file is location at
-* C:\Users\%USERNAME%\AppData\Local\Microsoft\Windows\Explorer
+* C:\Users\%username%\AppData\Local\Microsoft\Windows\Explorer
 * code is stolen from the following repository
 * Also See
 * https://github.com/thumbcacheviewer/thumbcacheviewer
@@ -36,17 +36,21 @@
 #define WINDOWS_10		0x20
 
 typedef struct DATABASE_HEADER {
-	char magicIdentifier[4];
-	unsigned int version;
-	unsigned int type;
+	/* Off[DEC] Description */
+	/* 00 */    char magicIdentifier[4];
+	/* 04 */    unsigned int version;
+	/* 08 */    unsigned int type;
+	/* totally 12 bytes */
 } DB_HEADER, *PDB_HEADER;
 
 
 // Found in WINDOWS_VISTA/7/8 databases.
 typedef struct DATABASE_HEADER_ENTRY_INFO_7 {
-	unsigned int firstCacheEntry;
-	unsigned int availableCacheEntry;
-	unsigned int numberCacheEntries;
+	/* Off[DEC] Description */
+	/* 00 */    unsigned int firstCacheEntry;
+	/* 04 */    unsigned int availableCacheEntry;
+	/* 08 */    unsigned int numberCacheEntries;
+	/* totally 12 bytes */
 } DB_HEADER_ENTRY_7, * PDB_HEADER_ENTRY_7;
 
 
@@ -59,8 +63,7 @@ typedef struct DATABASE_HEADER_ENTRY_INFO_10 {
 
 
 // Window 7 Thumb cache entry.
-typedef struct DATABASE_CACHE_ENTRY_7
-{
+typedef struct DATABASE_CACHE_ENTRY_7{
 	char magicIdentifier[4];
 	unsigned int dwCacheEntry;
 	long long entryHash;
@@ -74,8 +77,7 @@ typedef struct DATABASE_CACHE_ENTRY_7
 
 
 // Window 8+ Thumb cache entry.
-typedef struct DATABASE_CACHE_ENTRY_8P
-{
+typedef struct DATABASE_CACHE_ENTRY_8P{
 	char magicIdentifier[4];
 	unsigned int dwCacheEntry;
 	long long entryHash;
@@ -107,7 +109,6 @@ public:
 		memcpy(m_entryHash, hash, 19);
 	}
 
-
 	Wrapper() {
 		memset(m_entryHash, 0, 19);
 		memset(m_dataChecksum, 0 ,19);
@@ -132,7 +133,8 @@ public:
 		m_fileName = std::wstring(fileName, dwFileName);
 	}
 
-	~Wrapper() = default;
+	virtual ~Wrapper() = default;
+
 private:
 	unsigned int m_dwCache;
 	unsigned int m_dwData;
@@ -187,7 +189,7 @@ public:
 				status = false;
 				break;
 			}
-
+			// Create output directory
 			CreateOutputDir();
 
 			unsigned int firstCacheEntry = 0;
@@ -224,12 +226,12 @@ public:
 
 	bool SubParserWin10(HANDLE hFile) {
 		bool status = false;
-		PDB_CACHE_ENTRY_8P dbCacheEntry = (PDB_CACHE_ENTRY_8P)new char[sizeof(PDB_CACHE_ENTRY_8P)];
+		PDB_CACHE_ENTRY_8P dbCacheEntry = (PDB_CACHE_ENTRY_8P)new char[sizeof(DB_CACHE_ENTRY_8P)];
 		if (dbCacheEntry == NULL) {
 			return false;
 		}
 
-		unsigned int position = 28;
+		unsigned int position = 24;
 		unsigned int dwcacheEntry = 0;
 		DWORD dwRead = 0;
 
@@ -242,17 +244,18 @@ public:
 
 		unsigned int dwData = 0;
 		unsigned int dwPadding = 0;
+		unsigned int dwDataSize = 0;
 
+		int count = 0;
 
 		for (unsigned int i = 0; ; ++i) {
-			Wrapper obj;
-
 			memset(entryHash, 19, 0);
 			memset(dataChecksum, 19, 0);
 			memset(headerChecksum, 19, 0);
-			memset(fileName, MAX_PATH, 0);
+
 			dwFileName = 0;
 			dwData = 0;
+			dwDataSize = 0;
 
 			position = SetFilePointer(hFile, position, NULL, FILE_BEGIN);
 
@@ -265,40 +268,111 @@ public:
 				break;
 			}
 
-			if (memcmp(dbCacheEntry->magicIdentifier, DB_MAGIC_ID, 4) != 0) {
-				break; // 
-			}
-
-			dwcacheEntry = dbCacheEntry->dwCacheEntry;
-			position += dwcacheEntry;
-
-			sprintf_s(entryHash, 19, "0x%016llx", dbCacheEntry->entryHash);
-			dwFileName = dbCacheEntry->dwFilename;
-			dwFileName = min(dwFileName, MAX_PATH);
-			memset(fileName, 0, dwFileName);
-			
-			status = ReadFile(hFile, fileName, dwFileName, &dwRead, NULL);
-			if (status == false || dwRead != dwFileName) {
+			status = (memcmp(dbCacheEntry->magicIdentifier, DB_MAGIC_ID, 4) == 0);
+			if(status == false){
 				break;
 			}
-
+			
 			dwPadding = dbCacheEntry->dwPadding;
 			if (SetFilePointer(hFile, dwPadding, 0, FILE_CURRENT) == INVALID_SET_FILE_POINTER) {
 				break;
 			}
 
-			sprintf_s(dataChecksum, 19, "0x%016llx", dbCacheEntry->dataChecksum);
-			sprintf_s(headerChecksum, 19, "0x%016llx", dbCacheEntry->headerChecksum);
+			dwcacheEntry = dbCacheEntry->dwCacheEntry;
+			position += dwcacheEntry;
 
-			//
+			dwDataSize = dbCacheEntry->dwData;
+			
+			if (dwDataSize > 8) {
+				// handle file name
+				count++;
+				dwFileName = dbCacheEntry->dwFilename;
+				dwFileName = min(dwFileName, MAX_PATH);
+				memset(fileName, 0, MAX_PATH);
 
+				status = ReadFile(hFile, fileName, dwFileName, &dwRead, NULL);
+				if (status == false || dwRead != dwFileName) {
+					continue;
+				}
+				// save file content
+				char* buffer = new char[dwDataSize];
+				if (buffer == NULL) {
+					break;
+				}
+				memset(buffer, 0, dwDataSize);
+				status = ReadFile(hFile, buffer, dwDataSize, &dwRead, NULL);
+				if (status == false || dwRead <= 0) {
+					delete[] buffer;
+					continue;
+				}
+				if (memcmp(buffer, FILE_TYPE_BMP, 2) == 0) {
+					wmemcpy_s(fileName + (dwFileName >> 1), 4, L".bmp", 4);
+				}
+				else if (memcmp(buffer, FILE_TYPE_JPEG, 4) == 0) {
+					wmemcpy_s(fileName + (dwFileName >> 1), 4, L".jpg", 4);
+				}
+				else if (memcmp(buffer, FILE_TYPE_PNG, 8) == 0) {
+					wmemcpy_s(fileName + (dwFileName >> 1), 4, L".png", 4);
+				}
+				else {
+					// other type ?
+					delete[] buffer;
+					continue;
+				}
+				TrimInvalidChar(fileName);
+				HANDLE hFileSave = CreateFileW(fileName, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+				if (hFileSave == INVALID_HANDLE_VALUE) {
+					delete[] buffer;
+					continue;
+				}
+				WriteFile(hFileSave, buffer, dwDataSize, &dwRead, NULL);
+				CloseHandle(hFileSave);
 
+				sprintf_s(dataChecksum, 19, "0x%016llx", dbCacheEntry->dataChecksum);
+				sprintf_s(headerChecksum, 19, "0x%016llx", dbCacheEntry->headerChecksum);
+				sprintf_s(entryHash, 19, "0x%016llx", dbCacheEntry->entryHash);
+
+				Wrapper obj(dwcacheEntry, dwDataSize, entryHash, dataChecksum, dataChecksum, fileName, dwFileName);
+				m_data.push_back(obj);
+				delete[] buffer;
+			}
+		}
+		if (dbCacheEntry != NULL) {
+			delete[] dbCacheEntry;
+			dbCacheEntry = NULL;
+			std::cout << count << std::endl;
 		}
 	}
+
+
+	ThumbNail() {
+		memset(m_outputPath, 0, MAX_PATH * sizeof(wchar_t));
+	}
+
+	virtual ~ThumbNail() = default;
 
 private:
 	std::wstring m_dbPath;
 	wchar_t m_outputPath[MAX_PATH];
 	std::vector<Wrapper>m_data;
+
+	void TrimInvalidChar(wchar_t* fileName) {
+		wchar_t* filename_ptr = fileName;
+		while (filename_ptr != NULL && *filename_ptr != NULL)
+		{
+			if (*filename_ptr == L'\\' ||
+				*filename_ptr == L'/' ||
+				*filename_ptr == L':' ||
+				*filename_ptr == L'*' ||
+				*filename_ptr == L'?' ||
+				*filename_ptr == L'\"' ||
+				*filename_ptr == L'<' ||
+				*filename_ptr == L'>' ||
+				*filename_ptr == L'|'){
+				*filename_ptr = L'_';
+			}
+			++filename_ptr;
+		}
+	}
 };
 
