@@ -1,11 +1,12 @@
 #pragma once
 /*
 * thumbnail is project to extract information from database(db)
-* db file is location at
+* db file is located at
 * C:\Users\%username%\AppData\Local\Microsoft\Windows\Explorer
 * code is stolen from the following repository
 * Also See
 * https://github.com/thumbcacheviewer/thumbcacheviewer
+* Warning !!! Code just test on Windows 10 / 11
 */
 
 #include <io.h>
@@ -15,6 +16,7 @@
 #include <vector>
 #include <Windows.h>
 #include <wchar.h>
+#include <ShlObj_core.h>
 
 
 // Some magic identifiers
@@ -97,50 +99,39 @@ typedef struct DATABASE_CACHE_ENTRY_8P{
 class Wrapper {
 
 public:
-	void SetCacheSize(unsigned int cacheSize) {
-		m_dwCache = cacheSize;
-	}
-	
-	void SetDataSize(unsigned int dataSize) {
-		m_dwData = dataSize;
-	}
-
-	void SetEntryHash(const char * hash) {
-		memcpy(m_entryHash, hash, 19);
-	}
-
 	Wrapper() {
-		memset(m_entryHash, 0, 19);
-		memset(m_dataChecksum, 0 ,19);
-		memset(m_headerChecksum, 0, 19);
-		m_dwCache = 0;
 		m_dwData = 0;
+		m_offset = -1;
+		m_fileName = L"";
 	}
 
-	Wrapper(unsigned int cacheSize,
+	unsigned int GetOffset() const {
+		return m_offset;
+	}
+
+	unsigned int GetDataSize() const {
+		return m_dwData;
+	}
+
+	std::wstring GetFileName() const {
+		return m_fileName;
+	}
+
+	Wrapper(unsigned int offset,
 		    unsigned int dataSize,
-		    const char * hash,
-		    const char * checksum,
-		    const char * headersum,
 		    const wchar_t * fileName,
 		    unsigned int dwFileName){
-		
-		m_dwCache = cacheSize;
+
+		m_offset = offset;
 		m_dwData = dataSize;
-		memcpy(m_entryHash, hash, 19);
-		memcpy(m_dataChecksum, checksum, 19);
-		memcpy(m_headerChecksum, headersum, 19);
 		m_fileName = std::wstring(fileName, dwFileName);
 	}
 
 	virtual ~Wrapper() = default;
 
 private:
-	unsigned int m_dwCache;
+	unsigned int m_offset;
 	unsigned int m_dwData;
-	char m_entryHash[19];
-	char m_dataChecksum[19];
-	char m_headerChecksum[19];
 	std::wstring m_fileName;
 };
 
@@ -149,39 +140,75 @@ class ThumbNail {
 
 public:
 
-	bool Init(std::wstring path) {
-		bool status = true;
-		m_dbPath = path;
-		return status;
-	}
-
-	void CreateOutputDir() {
-		if (GetFileAttributesW(m_outputPath) == INVALID_FILE_ATTRIBUTES) {
-			CreateDirectoryW(m_outputPath, NULL);
-		}
-		SetCurrentDirectory(m_outputPath);
-		GetCurrentDirectory(MAX_PATH, m_outputPath);
-		return;
-	}
-
-	bool Parser() {
+	bool Init(LPCTSTR lpThumbFilePath) {
+		m_count = 0;
+		m_memoryBuffer = NULL;
+		m_dwMemoryBuffer = 0;
+		m_startCache = 0;
+		m_dbPath = std::wstring(lpThumbFilePath);
 		bool status = false;
-		HANDLE hFile = INVALID_HANDLE_VALUE;
-
 		do {
-			hFile = CreateFileW(m_dbPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-			if (hFile == INVALID_HANDLE_VALUE) {
+			m_hFile = CreateFileW(m_dbPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			if (m_hFile == INVALID_HANDLE_VALUE) {
 				break;
 			}
-			DWORD dwRead = 0;
-			DB_HEADER dbHeader = { 0 };
-			unsigned int fileOffset = 0;
-
-			status = ReadFile(hFile, &dbHeader, sizeof(DB_HEADER), &dwRead, NULL);
+			status = BaseParser();
 			if (status == false) {
 				break;
 			}
-			if (memcmp(dbHeader.magicIdentifier, DB_MAGIC_ID, 4) != 0 || dwRead != sizeof(DB_HEADER)) {
+			std::vector<Wrapper>obj;
+			status = StatisticsWin10(obj);
+		} while (false);
+		return status;
+	}
+
+	bool Init(const void * lpThumbFileContent, const int size){
+		m_count = 0;
+		m_startCache = 0;
+		m_dbPath = L"";
+		bool status = false;
+		do {
+			if (lpThumbFileContent == NULL || size <= 0) {
+				break;
+			}
+			m_memoryBuffer = (char*)lpThumbFileContent;
+			m_dwMemoryBuffer = size;
+			status = BaseParser();
+			if (status == false) {
+				break;
+			}
+			std::vector<Wrapper>obj;
+			status = StatisticsWin10(obj);
+
+		} while (false);
+		return status;
+	}
+
+	void Uninit() {
+		m_count = 0;
+		m_startCache = 0;
+		m_dbPath = L"";
+		if (m_hFile != INVALID_HANDLE_VALUE) {
+			CloseHandle(m_hFile);
+			m_hFile = INVALID_HANDLE_VALUE;
+		}
+		if (m_memoryBuffer != NULL) {
+			m_memoryBuffer = NULL;
+			m_dwMemoryBuffer = 0;
+		}
+	}
+
+	bool BaseParser() {
+		bool status = false;
+		do {
+			DB_HEADER dbHeader = { 0 };
+			unsigned int fileOffset = 0;
+
+			status = GetContent(fileOffset, (char*)&dbHeader, sizeof(DB_HEADER));
+			if (status == false) {
+				break;
+			}
+			if (memcmp(dbHeader.magicIdentifier, DB_MAGIC_ID, 4) != 0) {
 				status = false;
 				break;
 			}
@@ -189,190 +216,278 @@ public:
 				status = false;
 				break;
 			}
-			// Create output directory
-			CreateOutputDir();
-
-			unsigned int firstCacheEntry = 0;
-			unsigned int availableCcheEntry = 0;
-			unsigned int dwCacheEntries = 0;
+			fileOffset += sizeof(DB_HEADER);
 
 			if (dbHeader.version == WINDOWS_10) {
 				DB_HEADER_ENTRY_10 dbEntry = { 0 };
-				status = ReadFile(hFile, &dbEntry, sizeof(DB_HEADER_ENTRY_10), &dwRead, NULL);
-				if (status == false || dwRead != sizeof(DB_HEADER_ENTRY_10)) {
+				status = GetContent(fileOffset, (char *)&dbEntry, sizeof(DB_HEADER_ENTRY_10));
+				if (status == false) {
 					break;
 				}
-				firstCacheEntry = dbEntry.firstCacheEntry;
-				availableCcheEntry = dbEntry.availableCacheEntry;
-				status = SubParserWin10(hFile);
+				m_startCache = dbEntry.firstCacheEntry;
 			}
 			else {
 				DB_HEADER_ENTRY_7 dbEntry = { 0 };
-				status = ReadFile(hFile, &dbEntry, sizeof(DB_HEADER_ENTRY_7), &dwRead, NULL);
-				if (status == false || dwRead != sizeof(DB_HEADER_ENTRY_7)) {
+				status = GetContent(fileOffset, (char*)&dbEntry, sizeof(DB_HEADER_ENTRY_7));
+				if (status == false) {
 					break;
 				}
-				firstCacheEntry = dbEntry.firstCacheEntry;
-				availableCcheEntry = dbEntry.availableCacheEntry;
-				dwCacheEntries = dbEntry.numberCacheEntries;
+				m_startCache = dbEntry.firstCacheEntry;
 			}
-
 		} while (false);
-		if (hFile != INVALID_HANDLE_VALUE) {
-			CloseHandle(hFile);
-		}
+
 		return status;
 	}
 
-	bool SubParserWin10(HANDLE hFile) {
+	bool SaveAs(const unsigned int offset, const unsigned int size, CONST LPCTSTR lpFilePath) {
+		// save file content
+		DWORD dwWrite = 0;
 		bool status = false;
-		PDB_CACHE_ENTRY_8P dbCacheEntry = (PDB_CACHE_ENTRY_8P)new char[sizeof(DB_CACHE_ENTRY_8P)];
-		if (dbCacheEntry == NULL) {
+		char* buffer = new char[size];
+		if (buffer == NULL) {
 			return false;
 		}
-
-		unsigned int position = 24;
-		unsigned int dwcacheEntry = 0;
-		DWORD dwRead = 0;
-
-		char entryHash[19] = { 0 };
-		char dataChecksum[19] = { 0 };
-		char headerChecksum[19] = { 0 };
-
-		wchar_t fileName[MAX_PATH] = { 0 };
-		unsigned int dwFileName = 0;
-
-		unsigned int dwData = 0;
-		unsigned int dwPadding = 0;
-		unsigned int dwDataSize = 0;
-
-		int count = 0;
-
-		for (unsigned int i = 0; ; ++i) {
-			memset(entryHash, 19, 0);
-			memset(dataChecksum, 19, 0);
-			memset(headerChecksum, 19, 0);
-
-			dwFileName = 0;
-			dwData = 0;
-			dwDataSize = 0;
-
-			position = SetFilePointer(hFile, position, NULL, FILE_BEGIN);
-
-			if (position == INVALID_SET_FILE_POINTER) {
-				break;
-			}
-
-			status = ReadFile(hFile, dbCacheEntry, sizeof(DB_CACHE_ENTRY_8P), &dwRead, NULL);
-			if (status == false || dwRead != sizeof(DB_CACHE_ENTRY_8P)) {
-				break;
-			}
-
-			status = (memcmp(dbCacheEntry->magicIdentifier, DB_MAGIC_ID, 4) == 0);
-			if(status == false){
-				break;
-			}
-			
-			dwPadding = dbCacheEntry->dwPadding;
-			if (SetFilePointer(hFile, dwPadding, 0, FILE_CURRENT) == INVALID_SET_FILE_POINTER) {
-				break;
-			}
-
-			dwcacheEntry = dbCacheEntry->dwCacheEntry;
-			position += dwcacheEntry;
-
-			dwDataSize = dbCacheEntry->dwData;
-			
-			if (dwDataSize > 8) {
-				// handle file name
-				count++;
-				dwFileName = dbCacheEntry->dwFilename;
-				dwFileName = min(dwFileName, MAX_PATH);
-				memset(fileName, 0, MAX_PATH);
-
-				status = ReadFile(hFile, fileName, dwFileName, &dwRead, NULL);
-				if (status == false || dwRead != dwFileName) {
-					continue;
-				}
-				// save file content
-				char* buffer = new char[dwDataSize];
-				if (buffer == NULL) {
-					break;
-				}
-				memset(buffer, 0, dwDataSize);
-				status = ReadFile(hFile, buffer, dwDataSize, &dwRead, NULL);
-				if (status == false || dwRead <= 0) {
-					delete[] buffer;
-					continue;
-				}
-				if (memcmp(buffer, FILE_TYPE_BMP, 2) == 0) {
-					wmemcpy_s(fileName + (dwFileName >> 1), 4, L".bmp", 4);
-				}
-				else if (memcmp(buffer, FILE_TYPE_JPEG, 4) == 0) {
-					wmemcpy_s(fileName + (dwFileName >> 1), 4, L".jpg", 4);
-				}
-				else if (memcmp(buffer, FILE_TYPE_PNG, 8) == 0) {
-					wmemcpy_s(fileName + (dwFileName >> 1), 4, L".png", 4);
-				}
-				else {
-					// other type ?
-					delete[] buffer;
-					continue;
-				}
-				TrimInvalidChar(fileName);
-				HANDLE hFileSave = CreateFileW(fileName, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-				if (hFileSave == INVALID_HANDLE_VALUE) {
-					delete[] buffer;
-					continue;
-				}
-				WriteFile(hFileSave, buffer, dwDataSize, &dwRead, NULL);
-				CloseHandle(hFileSave);
-
-				sprintf_s(dataChecksum, 19, "0x%016llx", dbCacheEntry->dataChecksum);
-				sprintf_s(headerChecksum, 19, "0x%016llx", dbCacheEntry->headerChecksum);
-				sprintf_s(entryHash, 19, "0x%016llx", dbCacheEntry->entryHash);
-
-				Wrapper obj(dwcacheEntry, dwDataSize, entryHash, dataChecksum, dataChecksum, fileName, dwFileName);
-				m_data.push_back(obj);
-				delete[] buffer;
-			}
+		memset(buffer, 0, size);
+		// get content from file or memory 
+		status = GetContent(offset, buffer, size);
+		if (status == false) {
+			delete[] buffer;
+			buffer = NULL;
+			return false;
 		}
-		if (dbCacheEntry != NULL) {
-			delete[] dbCacheEntry;
-			dbCacheEntry = NULL;
-			std::cout << count << std::endl;
+		
+		HANDLE hFileSave = CreateFileW(lpFilePath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hFileSave == INVALID_HANDLE_VALUE) {
+			delete[] buffer;
+			buffer = NULL;
+			return false;
 		}
+		if (buffer != NULL) {
+			delete[] buffer;
+			buffer = NULL;
+		}
+		WriteFile(hFileSave, buffer, size, &dwWrite, NULL);
+		CloseHandle(hFileSave);
+		return true;
 	}
 
+	unsigned int GetCount() const {
+		return m_count;
+	}
+
+	bool GetItemList(std::vector<Wrapper>& items) {
+		return StatisticsWin10(items, true);
+	}
+
+	static void Extract(const void * lpThumbFileContent, int size, LPCTSTR lpOutputDirectory) {
+		ThumbNail obj;
+		std::vector<Wrapper>items;
+		bool status = false;
+		do {
+			status = obj.Init(lpThumbFileContent, size);
+			if (status == false) {
+				break;
+			}
+			status = obj.CreateOutputDir(lpOutputDirectory);
+			if (status == false) {
+				break;
+			}
+			status = obj.GetItemList(items);
+			if (status == false) {
+				break;
+			}
+			std::wstring savePath = std::wstring(lpOutputDirectory) + L"\\";
+			for (auto& it : items) {
+				obj.SaveAs(it.GetOffset(), it.GetDataSize(), (savePath + it.GetFileName()).c_str());
+			}
+
+		} while (false);
+		return;
+	}
+
+	static void Extract(LPCTSTR lpThumbFilePath, LPCTSTR lpOutputDirectory) {
+		ThumbNail obj;
+		std::vector<Wrapper>items;
+		bool status = false;
+		do {
+			status = obj.Init(lpThumbFilePath);
+			if (status == false) {
+				break;
+			}
+			status = obj.CreateOutputDir(lpOutputDirectory);
+			if (status == false) {
+				break;
+			}
+			status = obj.GetItemList(items);
+			if (status == false) {
+				break;
+			}
+			std::wstring savePath = std::wstring(lpOutputDirectory) + L"\\";
+			for (auto& it : items) {
+				obj.SaveAs(it.GetOffset(), it.GetDataSize(), (savePath + it.GetFileName()).c_str());
+			}
+
+		} while (false);
+		return;
+	}
 
 	ThumbNail() {
-		memset(m_outputPath, 0, MAX_PATH * sizeof(wchar_t));
+		m_hFile = INVALID_HANDLE_VALUE;
+		m_count = 0;
+		m_dbPath = L"";
 	}
 
-	virtual ~ThumbNail() = default;
+	virtual ~ThumbNail() {
+		
+	}
 
 private:
+	HANDLE m_hFile;
+
+	char* m_memoryBuffer;
+	unsigned int m_dwMemoryBuffer;
+	
 	std::wstring m_dbPath;
-	wchar_t m_outputPath[MAX_PATH];
-	std::vector<Wrapper>m_data;
+	unsigned int m_count;
+	int m_startCache;
 
 	void TrimInvalidChar(wchar_t* fileName) {
 		wchar_t* filename_ptr = fileName;
 		while (filename_ptr != NULL && *filename_ptr != NULL)
 		{
 			if (*filename_ptr == L'\\' ||
-				*filename_ptr == L'/' ||
-				*filename_ptr == L':' ||
-				*filename_ptr == L'*' ||
-				*filename_ptr == L'?' ||
+				*filename_ptr == L'/'  ||
+				*filename_ptr == L':'  ||
+				*filename_ptr == L'*'  ||
+				*filename_ptr == L'?'  ||
 				*filename_ptr == L'\"' ||
-				*filename_ptr == L'<' ||
-				*filename_ptr == L'>' ||
+				*filename_ptr == L'<'  ||
+				*filename_ptr == L'>'  ||
 				*filename_ptr == L'|'){
 				*filename_ptr = L'_';
 			}
 			++filename_ptr;
 		}
+	}
+	
+	bool GetContent(DWORD offset, char *content, DWORD dwContent) {
+		if (m_hFile != INVALID_HANDLE_VALUE) {
+			BOOL status = FALSE;
+			DWORD dwRead = 0;
+			DWORD position = SetFilePointer(m_hFile, offset, NULL, FILE_BEGIN);
+			if (position == INVALID_SET_FILE_POINTER) {
+				return false;
+			}
+			status = ReadFile(m_hFile, content, dwContent, &dwRead, NULL);
+			if (status && dwRead == dwContent) {
+				return true;
+			}
+			else return false;
+		}
+		else if (m_memoryBuffer != NULL && m_dwMemoryBuffer != 0) {
+			if (offset + dwContent < m_dwMemoryBuffer) {
+				memcpy(content, m_memoryBuffer + offset, dwContent);
+				return true;
+			}
+			else return false;
+		}
+		else return false;
+	}
+
+	bool GetAndCatExtension(const char * buffer, wchar_t * fileName, DWORD dwFileName) {
+		if (buffer == NULL || fileName == NULL || dwFileName <= 0) {
+			return false;
+		}
+		TrimInvalidChar(fileName);
+		if (memcmp(buffer, FILE_TYPE_BMP, 2) == 0) {
+			wmemcpy_s(fileName + (dwFileName >> 1), 4, L".bmp", 4);
+		}
+		else if (memcmp(buffer, FILE_TYPE_JPEG, 4) == 0) {
+			wmemcpy_s(fileName + (dwFileName >> 1), 4, L".jpg", 4);
+		}
+		else if (memcmp(buffer, FILE_TYPE_PNG, 8) == 0) {
+			wmemcpy_s(fileName + (dwFileName >> 1), 4, L".png", 4);
+		}
+		else {
+			// other type ?
+			return false;
+		}
+		return true;
+	}
+
+	bool StatisticsWin10(std::vector<Wrapper>& items, bool needSave = false) {
+		bool status = false;
+		PDB_CACHE_ENTRY_8P dbCacheEntry = NULL;
+		dbCacheEntry = (PDB_CACHE_ENTRY_8P)new char[sizeof(DB_CACHE_ENTRY_8P)];
+		if (dbCacheEntry == NULL) {
+			return false;
+		}
+		memset(dbCacheEntry, 0, sizeof(DB_CACHE_ENTRY_8P));
+		unsigned int position = m_startCache;
+		for (int i = 0;; ++i) {
+			status = GetContent(position, (char *)dbCacheEntry, sizeof(DB_CACHE_ENTRY_8P));
+			if (status == false) {
+				delete[] dbCacheEntry;
+				dbCacheEntry = NULL;
+				break;
+			}
+			status = (memcmp(dbCacheEntry->magicIdentifier, DB_MAGIC_ID, 4) == 0);
+			if (status == false) {
+				continue;
+			}
+			if (dbCacheEntry->dwData > 8) {
+				m_count++;
+				if (needSave) {
+					wchar_t fileName[MAX_PATH] = { 0 };
+					unsigned int dwFileName = dbCacheEntry->dwFilename;
+					unsigned int dwDataSize = dbCacheEntry->dwData;
+					unsigned int dwPadding = dbCacheEntry->dwPadding;
+					unsigned int subPosition = position + dwPadding + sizeof(DB_CACHE_ENTRY_8P);
+
+					status = GetContent(subPosition, (char*)fileName, dwFileName);
+					if (status == false) {
+						continue;
+					}
+					char buffer[9] = { 0 };
+					status = GetContent(subPosition + dwFileName, buffer, 8);
+					if (status == false) {
+						continue;
+					}
+					status = GetAndCatExtension(buffer, fileName, dwFileName);
+					if (status == false) {
+						continue;
+					}
+					Wrapper item(subPosition + dwFileName, dwDataSize, fileName, dwFileName);
+					items.push_back(item);
+				}
+				
+				position += dbCacheEntry->dwCacheEntry;
+				memset(dbCacheEntry, 0, sizeof(DB_CACHE_ENTRY_8P));
+				continue;
+			}
+			position += dbCacheEntry->dwCacheEntry;
+			
+		}
+
+		if (dbCacheEntry != NULL) {
+			delete[] dbCacheEntry;
+			dbCacheEntry = NULL;
+		}
+		return true;
+	}
+	
+	bool CreateOutputDir(LPCTSTR outputPath) {
+		if (GetFileAttributesW(outputPath) == INVALID_FILE_ATTRIBUTES) {
+			return SHCreateDirectoryExW(NULL, outputPath, NULL) == ERROR_SUCCESS;
+		}
+		/*
+		* `SetCurrentDirectory` is not safe in multi-thread scenario
+		* if some thread use this API, all threads in this process will be affected!
+		* Also See
+		* https://docs.microsoft.com/zh-cn/windows/win32/api/winbase/nf-winbase-setcurrentdirectory
+		*/
+		// SetCurrentDirectory(outputPath);
+		return true;
 	}
 };
 
