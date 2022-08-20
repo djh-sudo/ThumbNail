@@ -153,7 +153,7 @@ public:
 		m_dbPath = std::wstring(lpThumbFilePath);
 		bool status = false;
 		do {
-			m_hFile = CreateFileW(m_dbPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+			m_hFile = ::CreateFileW(m_dbPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 			if (m_hFile == INVALID_HANDLE_VALUE) {
 				break;
 			}
@@ -196,7 +196,7 @@ public:
 		m_dbPath = L"";
 		memset(&m_dbHeader, 0, sizeof(m_dbHeader));
 		if (m_hFile != INVALID_HANDLE_VALUE) {
-			CloseHandle(m_hFile);
+			::CloseHandle(m_hFile);
 			m_hFile = INVALID_HANDLE_VALUE;
 		}
 		if (m_memoryBuffer != NULL) {
@@ -331,11 +331,11 @@ private:
 		if (m_hFile != INVALID_HANDLE_VALUE) {
 			BOOL status = FALSE;
 			DWORD dwRead = 0;
-			DWORD position = SetFilePointer(m_hFile, offset, NULL, FILE_BEGIN);
+			DWORD position = ::SetFilePointer(m_hFile, offset, NULL, FILE_BEGIN);
 			if (position == INVALID_SET_FILE_POINTER) {
 				return false;
 			}
-			status = ReadFile(m_hFile, content, dwContent, &dwRead, NULL);
+			status = ::ReadFile(m_hFile, content, dwContent, &dwRead, NULL);
 			if (status && dwRead == dwContent) {
 				return true;
 			}
@@ -509,8 +509,8 @@ private:
 	}
 
 	bool CreateOutputDir(LPCTSTR outputPath) {
-		if (GetFileAttributesW(outputPath) == INVALID_FILE_ATTRIBUTES) {
-			return SHCreateDirectoryExW(NULL, outputPath, NULL) == ERROR_SUCCESS;
+		if (::GetFileAttributesW(outputPath) == INVALID_FILE_ATTRIBUTES) {
+			return ::SHCreateDirectoryExW(NULL, outputPath, NULL) == ERROR_SUCCESS;
 		}
 		/*
 		* `SetCurrentDirectory` is not safe in multi-thread scenario
