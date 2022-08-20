@@ -212,33 +212,25 @@ public:
 		// save file content
 		DWORD dwWrite = 0;
 		bool status = false;
-		char* buffer = new char[size];
+		std::unique_ptr<char[]> buffer(new char[size]);
 		if (buffer == NULL) {
 			return false;
 		}
-		memset(buffer, 0, size);
+		memset(buffer.get(), 0, size);
 		// get content from file or memory 
-		status = GetContent(offset, buffer, size);
+		status = GetContent(offset, buffer.get(), size);
 		if (status == false) {
-			delete[] buffer;
-			buffer = NULL;
 			return false;
 		}
 		
-		HANDLE hFileSave = CreateFileW(lpFilePath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		HANDLE hFileSave = CreateFile(lpFilePath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 		if (hFileSave == INVALID_HANDLE_VALUE) {
-			delete[] buffer;
-			buffer = NULL;
 			return false;
 		}
 		
-		WriteFile(hFileSave, buffer, size, &dwWrite, NULL);
+		WriteFile(hFileSave, buffer.get(), size, &dwWrite, NULL);
 		CloseHandle(hFileSave);
 		hFileSave = INVALID_HANDLE_VALUE;
-		if (buffer != NULL) {
-			delete[] buffer;
-			buffer = NULL;
-		}
 		return true;
 	}
 
