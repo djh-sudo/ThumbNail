@@ -312,20 +312,10 @@ public:
 	}
 
 	virtual ~ThumbNail() {
-		
+		Uninit();
 	}
 
 private:
-	HANDLE m_hFile;
-
-	char* m_memoryBuffer;
-	unsigned int m_dwMemoryBuffer;
-	
-	std::wstring m_dbPath;
-	unsigned int m_count;
-	int m_startCache;
-	DB_HEADER m_dbHeader;
-
 	void TrimInvalidChar(wchar_t* fileName) {
 		wchar_t* filename_ptr = fileName;
 		while (filename_ptr != NULL && *filename_ptr != NULL)
@@ -583,4 +573,14 @@ private:
 		return status;
 	}
 
+private:
+	HANDLE m_hFile;
+
+	char* m_memoryBuffer;
+	unsigned int m_dwMemoryBuffer;
+
+	std::wstring m_dbPath;
+	unsigned int m_count;
+	int m_startCache;
+	DB_HEADER m_dbHeader;
 };
