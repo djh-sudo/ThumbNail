@@ -49,7 +49,29 @@ using namespace std;
 * Mention!!! Support multi-level directory
 */
 int main() {
-	ThumbNail::Extract(L"C:/Users/Administrator/AppData/Local/Microsoft/Windows/Explorer/thumbcache_256.db", L"C:\\results");
+	
+	FILE* fp = fopen("C:/Users/Administrator/AppData/Local/Microsoft/Windows/Explorer/thumbcache_256.db", "rb");
+	if (fp == NULL) {
+		return -1;
+	}
+	char* buf = NULL;
+	int bufSize = 0;
+	assert(fseek(fp, 0, SEEK_END) == 0);
+	bufSize = ftell(fp);
+	buf = new char[bufSize + 1];
+	assert(buf);
+	fseek(fp, 0, SEEK_SET);
+	fread(buf, bufSize, 1, fp);
+	// load memory
+
+	ThumbNail::Extract(buf, bufSize, L"C:\\1\\2");
+
+	// free memory
+	if (buf != NULL) {
+		delete[] buf;
+		buf = NULL;
+	}
+	
 	system("pause");
 	return 0;
 }

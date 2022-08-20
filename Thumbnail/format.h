@@ -28,14 +28,15 @@
 /*
 * database version in different Windows platform
 * ignore version
-* #define WINDOWS_8		    0x1A
 * #define WINDOWS_8v2		0x1C
 * #define WINDOWS_8v3		0x1E
 * #define WINDOWS_8_1		0x1F
-* #define WINDOWS_VISTA	    0x14
 */
-#define WINDOWS_7		0x15
+
 #define WINDOWS_10		0x20
+#define WINDOWS_7		0x15
+#define WINDOWS_8		0x1A
+#define WINDOWS_VISTA	0x14
 
 typedef struct DATABASE_HEADER {
 	/* Off[DEC] Description */
@@ -140,11 +141,12 @@ class ThumbNail {
 
 public:
 
-	bool Init(LPCTSTR lpThumbFilePath) {
+	bool Init(CONST LPCTSTR lpThumbFilePath) {
 		m_count = 0;
 		m_memoryBuffer = NULL;
 		m_dwMemoryBuffer = 0;
 		m_startCache = 0;
+		memset(&m_dbHeader, 0, sizeof(m_dbHeader));
 		m_dbPath = std::wstring(lpThumbFilePath);
 		bool status = false;
 		do {
@@ -157,7 +159,7 @@ public:
 				break;
 			}
 			std::vector<Wrapper>obj;
-			status = StatisticsWin10(obj);
+			status = Statistics(obj);
 		} while (false);
 		return status;
 	}
@@ -167,6 +169,7 @@ public:
 		m_startCache = 0;
 		m_dbPath = L"";
 		bool status = false;
+		memset(&m_dbHeader, 0, sizeof(m_dbHeader));
 		do {
 			if (lpThumbFileContent == NULL || size <= 0) {
 				break;
@@ -178,7 +181,7 @@ public:
 				break;
 			}
 			std::vector<Wrapper>obj;
-			status = StatisticsWin10(obj);
+			status = Statistics(obj);
 
 		} while (false);
 		return status;
@@ -188,6 +191,7 @@ public:
 		m_count = 0;
 		m_startCache = 0;
 		m_dbPath = L"";
+		memset(&m_dbHeader, 0, sizeof(m_dbHeader));
 		if (m_hFile != INVALID_HANDLE_VALUE) {
 			CloseHandle(m_hFile);
 			m_hFile = INVALID_HANDLE_VALUE;
@@ -195,48 +199,10 @@ public:
 		if (m_memoryBuffer != NULL) {
 			m_memoryBuffer = NULL;
 			m_dwMemoryBuffer = 0;
+			/*
+			* caller should free memory !
+			*/
 		}
-	}
-
-	bool BaseParser() {
-		bool status = false;
-		do {
-			DB_HEADER dbHeader = { 0 };
-			unsigned int fileOffset = 0;
-
-			status = GetContent(fileOffset, (char*)&dbHeader, sizeof(DB_HEADER));
-			if (status == false) {
-				break;
-			}
-			if (memcmp(dbHeader.magicIdentifier, DB_MAGIC_ID, 4) != 0) {
-				status = false;
-				break;
-			}
-			if (dbHeader.version != WINDOWS_7 && dbHeader.version != WINDOWS_10) {
-				status = false;
-				break;
-			}
-			fileOffset += sizeof(DB_HEADER);
-
-			if (dbHeader.version == WINDOWS_10) {
-				DB_HEADER_ENTRY_10 dbEntry = { 0 };
-				status = GetContent(fileOffset, (char *)&dbEntry, sizeof(DB_HEADER_ENTRY_10));
-				if (status == false) {
-					break;
-				}
-				m_startCache = dbEntry.firstCacheEntry;
-			}
-			else {
-				DB_HEADER_ENTRY_7 dbEntry = { 0 };
-				status = GetContent(fileOffset, (char*)&dbEntry, sizeof(DB_HEADER_ENTRY_7));
-				if (status == false) {
-					break;
-				}
-				m_startCache = dbEntry.firstCacheEntry;
-			}
-		} while (false);
-
-		return status;
 	}
 
 	bool SaveAs(const unsigned int offset, const unsigned int size, CONST LPCTSTR lpFilePath) {
@@ -262,12 +228,13 @@ public:
 			buffer = NULL;
 			return false;
 		}
+		
+		WriteFile(hFileSave, buffer, size, &dwWrite, NULL);
+		CloseHandle(hFileSave);
 		if (buffer != NULL) {
 			delete[] buffer;
 			buffer = NULL;
 		}
-		WriteFile(hFileSave, buffer, size, &dwWrite, NULL);
-		CloseHandle(hFileSave);
 		return true;
 	}
 
@@ -276,10 +243,15 @@ public:
 	}
 
 	bool GetItemList(std::vector<Wrapper>& items) {
-		return StatisticsWin10(items, true);
+		if (m_hFile == INVALID_HANDLE_VALUE && m_memoryBuffer == NULL) {
+			return false;
+		}
+		else {
+			return Statistics(items, true);
+		}
 	}
 
-	static void Extract(const void * lpThumbFileContent, int size, LPCTSTR lpOutputDirectory) {
+	static void Extract(const void *lpThumbFileContent, int size, LPCTSTR lpOutputDirectory) {
 		ThumbNail obj;
 		std::vector<Wrapper>items;
 		bool status = false;
@@ -333,7 +305,10 @@ public:
 
 	ThumbNail() {
 		m_hFile = INVALID_HANDLE_VALUE;
+		m_memoryBuffer = NULL;
+		m_dwMemoryBuffer = 0;
 		m_count = 0;
+		m_startCache = 0;
 		m_dbPath = L"";
 	}
 
@@ -350,6 +325,7 @@ private:
 	std::wstring m_dbPath;
 	unsigned int m_count;
 	int m_startCache;
+	DB_HEADER m_dbHeader;
 
 	void TrimInvalidChar(wchar_t* fileName) {
 		wchar_t* filename_ptr = fileName;
@@ -476,6 +452,76 @@ private:
 		return true;
 	}
 	
+	bool StatisticsWin7(std::vector<Wrapper>& items, bool needSave = false) {
+		bool status = false;
+		PDB_CACHE_ENTRY_7 dbCacheEntry = NULL;
+		dbCacheEntry = (PDB_CACHE_ENTRY_7)new char[sizeof(PDB_CACHE_ENTRY_7)];
+		if (dbCacheEntry == NULL) {
+			return false;
+		}
+		memset(dbCacheEntry, 0, sizeof(PDB_CACHE_ENTRY_7));
+		unsigned int position = m_startCache;
+		for (int i = 0;; ++i) {
+			status = GetContent(position, (char*)dbCacheEntry, sizeof(PDB_CACHE_ENTRY_7));
+			if (status == false) {
+				delete[] dbCacheEntry;
+				dbCacheEntry = NULL;
+				break;
+			}
+			status = (memcmp(dbCacheEntry->magicIdentifier, DB_MAGIC_ID, 4) == 0);
+			if (status == false) {
+				continue;
+			}
+			if (dbCacheEntry->dwData > 8) {
+				m_count++;
+				if (needSave) {
+					wchar_t fileName[MAX_PATH] = { 0 };
+					unsigned int dwFileName = dbCacheEntry->dwFilename;
+					unsigned int dwDataSize = dbCacheEntry->dwData;
+					unsigned int dwPadding = dbCacheEntry->dwPadding;
+					unsigned int subPosition = position + dwPadding + sizeof(PDB_CACHE_ENTRY_7);
+
+					status = GetContent(subPosition, (char*)fileName, dwFileName);
+					if (status == false) {
+						continue;
+					}
+					char buffer[9] = { 0 };
+					status = GetContent(subPosition + dwFileName, buffer, 8);
+					if (status == false) {
+						continue;
+					}
+					status = GetAndCatExtension(buffer, fileName, dwFileName);
+					if (status == false) {
+						continue;
+					}
+					Wrapper item(subPosition + dwFileName, dwDataSize, fileName, dwFileName);
+					items.push_back(item);
+				}
+
+				position += dbCacheEntry->dwCacheEntry;
+				memset(dbCacheEntry, 0, sizeof(PDB_CACHE_ENTRY_7));
+				continue;
+			}
+			position += dbCacheEntry->dwCacheEntry;
+
+		}
+
+		if (dbCacheEntry != NULL) {
+			delete[] dbCacheEntry;
+			dbCacheEntry = NULL;
+		}
+		return true;
+	}
+
+	bool Statistics(std::vector<Wrapper>& items, bool needSave = false) {
+		if (m_dbHeader.version == WINDOWS_10) {
+			return StatisticsWin10(items, needSave);
+		}
+		else {
+			return StatisticsWin7(items, needSave);
+		}
+	}
+
 	bool CreateOutputDir(LPCTSTR outputPath) {
 		if (GetFileAttributesW(outputPath) == INVALID_FILE_ATTRIBUTES) {
 			return SHCreateDirectoryExW(NULL, outputPath, NULL) == ERROR_SUCCESS;
@@ -489,5 +535,49 @@ private:
 		// SetCurrentDirectory(outputPath);
 		return true;
 	}
+
+	bool BaseParser() {
+		bool status = false;
+		do {
+			unsigned int fileOffset = 0;
+
+			status = GetContent(fileOffset, (char*)&m_dbHeader, sizeof(DB_HEADER));
+			if (status == false) {
+				break;
+			}
+			if (memcmp(m_dbHeader.magicIdentifier, DB_MAGIC_ID, 4) != 0) {
+				status = false;
+				break;
+			}
+			if (m_dbHeader.version != WINDOWS_10 &&
+				m_dbHeader.version != WINDOWS_7 &&
+				m_dbHeader.version != WINDOWS_8 &&
+				m_dbHeader.version != WINDOWS_VISTA) {
+				status = false;
+				break;
+			}
+			fileOffset += sizeof(DB_HEADER);
+
+			if (m_dbHeader.version == WINDOWS_10) {
+				DB_HEADER_ENTRY_10 dbEntry = { 0 };
+				status = GetContent(fileOffset, (char*)&dbEntry, sizeof(DB_HEADER_ENTRY_10));
+				if (status == false) {
+					break;
+				}
+				m_startCache = dbEntry.firstCacheEntry;
+			}
+			else {
+				DB_HEADER_ENTRY_7 dbEntry = { 0 };
+				status = GetContent(fileOffset, (char*)&dbEntry, sizeof(DB_HEADER_ENTRY_7));
+				if (status == false) {
+					break;
+				}
+				m_startCache = dbEntry.firstCacheEntry;
+			}
+		} while (false);
+
+		return status;
+	}
+
 };
 
