@@ -147,6 +147,9 @@ public:
 		m_dwMemoryBuffer = 0;
 		m_startCache = 0;
 		memset(&m_dbHeader, 0, sizeof(m_dbHeader));
+		if (lpThumbFilePath == NULL) {
+			return false;
+		}
 		m_dbPath = std::wstring(lpThumbFilePath);
 		bool status = false;
 		do {
@@ -171,7 +174,7 @@ public:
 		bool status = false;
 		memset(&m_dbHeader, 0, sizeof(m_dbHeader));
 		do {
-			if (lpThumbFileContent == NULL || size <= 0) {
+			if (lpThumbFileContent == NULL || size <= 0 || size > INT_MAX) {
 				break;
 			}
 			m_memoryBuffer = (char*)lpThumbFileContent;
@@ -251,7 +254,7 @@ public:
 		}
 	}
 
-	static void Extract(const void *lpThumbFileContent, int size, LPCTSTR lpOutputDirectory) {
+	static void Extract(const void *lpThumbFileContent, const int size, CONST LPCTSTR lpOutputDirectory) {
 		ThumbNail obj;
 		std::vector<Wrapper>items;
 		bool status = false;
@@ -272,12 +275,12 @@ public:
 			for (auto& it : items) {
 				obj.SaveAs(it.GetOffset(), it.GetDataSize(), (savePath + it.GetFileName()).c_str());
 			}
-
+			obj.Uninit();
 		} while (false);
 		return;
 	}
 
-	static void Extract(LPCTSTR lpThumbFilePath, LPCTSTR lpOutputDirectory) {
+	static void Extract(CONST LPCTSTR lpThumbFilePath, CONST LPCTSTR lpOutputDirectory) {
 		ThumbNail obj;
 		std::vector<Wrapper>items;
 		bool status = false;
@@ -298,7 +301,7 @@ public:
 			for (auto& it : items) {
 				obj.SaveAs(it.GetOffset(), it.GetDataSize(), (savePath + it.GetFileName()).c_str());
 			}
-
+			obj.Uninit();
 		} while (false);
 		return;
 	}
@@ -409,7 +412,7 @@ private:
 			}
 			status = (memcmp(dbCacheEntry->magicIdentifier, DB_MAGIC_ID, 4) == 0);
 			if (status == false) {
-				continue;
+				break;
 			}
 			if (dbCacheEntry->dwData > 8) {
 				m_count++;
@@ -420,18 +423,18 @@ private:
 					unsigned int dwPadding = dbCacheEntry->dwPadding;
 					unsigned int subPosition = position + dwPadding + sizeof(DB_CACHE_ENTRY_8P);
 
-					status = GetContent(subPosition, (char*)fileName, dwFileName);
+					status = GetContent(subPosition, (char *)fileName, dwFileName);
 					if (status == false) {
-						continue;
+						break;
 					}
 					char buffer[9] = { 0 };
 					status = GetContent(subPosition + dwFileName, buffer, 8);
 					if (status == false) {
-						continue;
+						break;
 					}
 					status = GetAndCatExtension(buffer, fileName, dwFileName);
 					if (status == false) {
-						continue;
+						break;
 					}
 					Wrapper item(subPosition + dwFileName, dwDataSize, fileName, dwFileName);
 					items.push_back(item);
@@ -470,7 +473,7 @@ private:
 			}
 			status = (memcmp(dbCacheEntry->magicIdentifier, DB_MAGIC_ID, 4) == 0);
 			if (status == false) {
-				continue;
+				break;
 			}
 			if (dbCacheEntry->dwData > 8) {
 				m_count++;
@@ -483,16 +486,16 @@ private:
 
 					status = GetContent(subPosition, (char*)fileName, dwFileName);
 					if (status == false) {
-						continue;
+						break;
 					}
 					char buffer[9] = { 0 };
 					status = GetContent(subPosition + dwFileName, buffer, 8);
 					if (status == false) {
-						continue;
+						break;
 					}
 					status = GetAndCatExtension(buffer, fileName, dwFileName);
 					if (status == false) {
-						continue;
+						break;
 					}
 					Wrapper item(subPosition + dwFileName, dwDataSize, fileName, dwFileName);
 					items.push_back(item);
@@ -580,4 +583,3 @@ private:
 	}
 
 };
-
