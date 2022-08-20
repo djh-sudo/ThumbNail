@@ -369,7 +369,7 @@ private:
 		else return false;
 	}
 
-	bool GetAndCatExtension(const char * buffer, wchar_t * fileName, DWORD dwFileName) {
+	bool GetAndCatExtension(const char *buffer, wchar_t *fileName, DWORD dwFileName) {
 		if (buffer == NULL || fileName == NULL || dwFileName <= 0) {
 			return false;
 		}
@@ -411,7 +411,7 @@ private:
 				break;
 			}
 			if (dbCacheEntry->dwData > 8) {
-				m_count++;
+				
 				if (needSave) {
 					wchar_t fileName[MAX_PATH] = { 0 };
 					unsigned int dwFileName = dbCacheEntry->dwFilename;
@@ -434,6 +434,9 @@ private:
 					}
 					Wrapper item(subPosition + dwFileName, dwDataSize, fileName, dwFileName);
 					items.push_back(item);
+				}
+				else {
+					m_count++;
 				}
 				
 				position += dbCacheEntry->dwCacheEntry;
@@ -472,7 +475,6 @@ private:
 				break;
 			}
 			if (dbCacheEntry->dwData > 8) {
-				m_count++;
 				if (needSave) {
 					wchar_t fileName[MAX_PATH] = { 0 };
 					unsigned int dwFileName = dbCacheEntry->dwFilename;
@@ -495,6 +497,9 @@ private:
 					}
 					Wrapper item(subPosition + dwFileName, dwDataSize, fileName, dwFileName);
 					items.push_back(item);
+				}
+				else {
+					m_count++;
 				}
 
 				position += dbCacheEntry->dwCacheEntry;
