@@ -234,6 +234,7 @@ public:
 		
 		WriteFile(hFileSave, buffer, size, &dwWrite, NULL);
 		CloseHandle(hFileSave);
+		hFileSave = INVALID_HANDLE_VALUE;
 		if (buffer != NULL) {
 			delete[] buffer;
 			buffer = NULL;
@@ -246,12 +247,7 @@ public:
 	}
 
 	bool GetItemList(std::vector<Wrapper>& items) {
-		if (m_hFile == INVALID_HANDLE_VALUE && m_memoryBuffer == NULL) {
-			return false;
-		}
-		else {
-			return Statistics(items, true);
-		}
+		return Statistics(items, true);
 	}
 
 	static void Extract(const void *lpThumbFileContent, const int size, CONST LPCTSTR lpOutputDirectory) {
