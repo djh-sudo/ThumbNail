@@ -169,7 +169,6 @@ public:
 		return status;
 	}
 
-	bool Init(const void const* lpThumbFileContent, const int size){
 		m_count = 0;
 		m_startCache = 0;
 		m_dbPath = L"";
@@ -244,7 +243,6 @@ public:
 		return Statistics(items, true);
 	}
 
-	static void Extract(const void const* lpThumbFileContent, const int size, CONST LPCTSTR lpOutputDirectory) {
 		ThumbNail obj;
 		std::vector<Wrapper>items;
 		bool status = false;
