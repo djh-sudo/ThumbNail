@@ -101,12 +101,7 @@ typedef struct DATABASE_CACHE_ENTRY_8P{
 class Wrapper {
 
 public:
-	Wrapper() {
-		m_dwData = 0;
-		m_offset = -1;
-		m_fileName = L"";
-	}
-
+	
 	unsigned int GetOffset() const {
 		return m_offset;
 	}
@@ -119,7 +114,13 @@ public:
 		return m_fileName;
 	}
 
-	Wrapper(unsigned int offset,
+	explicit Wrapper() {
+		m_dwData = 0;
+		m_offset = -1;
+		m_fileName = L"";
+	}
+	
+	explicit Wrapper(unsigned int offset,
 		    unsigned int dataSize,
 		    const wchar_t * fileName,
 		    unsigned int dwFileName){
@@ -168,7 +169,6 @@ public:
 		return status;
 	}
 
-	bool Init(const void * lpThumbFileContent, const int size){
 		m_count = 0;
 		m_startCache = 0;
 		m_dbPath = L"";
@@ -243,7 +243,6 @@ public:
 		return Statistics(items, true);
 	}
 
-	static void Extract(const void *lpThumbFileContent, const int size, CONST LPCTSTR lpOutputDirectory) {
 		ThumbNail obj;
 		std::vector<Wrapper>items;
 		bool status = false;
@@ -295,7 +294,7 @@ public:
 		return;
 	}
 
-	ThumbNail() {
+	explicit ThumbNail() {
 		m_hFile = INVALID_HANDLE_VALUE;
 		m_memoryBuffer = NULL;
 		m_dwMemoryBuffer = 0;
@@ -415,7 +414,7 @@ private:
 						break;
 					}
 					Wrapper item(subPosition + dwFileName, dwDataSize, fileName, dwFileName);
-					items.push_back(item);
+					items.emplace_back(item);
 				}
 				else {
 					m_count++;
@@ -508,7 +507,7 @@ private:
 		}
 	}
 
-	bool CreateOutputDir(LPCTSTR outputPath) {
+	bool CreateOutputDir(CONST LPCTSTR outputPath) {
 		if (::GetFileAttributesW(outputPath) == INVALID_FILE_ATTRIBUTES) {
 			return ::SHCreateDirectoryExW(NULL, outputPath, NULL) == ERROR_SUCCESS;
 		}
