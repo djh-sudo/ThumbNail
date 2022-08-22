@@ -358,17 +358,16 @@ private:
 		}
 		TrimInvalidChar(fileName);
 		if (memcmp(buffer, FILE_TYPE_BMP, 2) == 0) {
-			wmemcpy_s(fileName + (dwFileName >> 1), 4, L".bmp", 4);
+			wsprintfW(fileName, L"%ws.bmp", fileName);
 		}
 		else if (memcmp(buffer, FILE_TYPE_JPEG, 4) == 0) {
-			wmemcpy_s(fileName + (dwFileName >> 1), 4, L".jpg", 4);
+			wsprintfW(fileName, L"%ws.jpg", fileName);
 		}
 		else if (memcmp(buffer, FILE_TYPE_PNG, 8) == 0) {
-			wmemcpy_s(fileName + (dwFileName >> 1), 4, L".png", 4);
+			wsprintfW(fileName, L"%ws.png", fileName);
 		}
 		else {
 			// other type ?
-			return false;
 		}
 		return true;
 	}
