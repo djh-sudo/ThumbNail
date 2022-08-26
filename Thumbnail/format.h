@@ -45,7 +45,7 @@ typedef struct DATABASE_HEADER {
 	/* 04 */    unsigned int version;
 	/* 08 */    unsigned int type;
 	/* totally 12 bytes */
-} DB_HEADER, *PDB_HEADER;
+} DB_HEADER, * PDB_HEADER;
 
 
 // Found in WINDOWS_VISTA/7/8 databases.
@@ -67,7 +67,7 @@ typedef struct DATABASE_HEADER_ENTRY_INFO_10 {
 
 
 // Window 7 Thumb cache entry.
-typedef struct DATABASE_CACHE_ENTRY_7{
+typedef struct DATABASE_CACHE_ENTRY_7 {
 	char magicIdentifier[4];
 	unsigned int dwCacheEntry;
 	long long entryHash;
@@ -81,7 +81,7 @@ typedef struct DATABASE_CACHE_ENTRY_7{
 
 
 // Window 8+ Thumb cache entry.
-typedef struct DATABASE_CACHE_ENTRY_8P{
+typedef struct DATABASE_CACHE_ENTRY_8P {
 	char magicIdentifier[4];
 	unsigned int dwCacheEntry;
 	long long entryHash;
@@ -101,7 +101,12 @@ typedef struct DATABASE_CACHE_ENTRY_8P{
 class Wrapper {
 
 public:
-	
+	Wrapper() {
+		m_dwData = 0;
+		m_offset = -1;
+		m_fileName = L"";
+	}
+
 	unsigned int GetOffset() const {
 		return m_offset;
 	}
@@ -114,16 +119,10 @@ public:
 		return m_fileName;
 	}
 
-	explicit Wrapper() {
-		m_dwData = 0;
-		m_offset = -1;
-		m_fileName = L"";
-	}
-	
-	explicit Wrapper(unsigned int offset,
-		    unsigned int dataSize,
-		    const wchar_t * fileName,
-		    unsigned int dwFileName){
+	Wrapper(unsigned int offset,
+		unsigned int dataSize,
+		const wchar_t* fileName,
+		unsigned int dwFileName) {
 
 		m_offset = offset;
 		m_dwData = dataSize;
@@ -169,6 +168,7 @@ public:
 		return status;
 	}
 
+	bool Init(const void* lpThumbFileContent, const int size) {
 		m_count = 0;
 		m_startCache = 0;
 		m_dbPath = L"";
@@ -223,12 +223,12 @@ public:
 		if (status == false) {
 			return false;
 		}
-		
+
 		HANDLE hFileSave = CreateFile(lpFilePath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 		if (hFileSave == INVALID_HANDLE_VALUE) {
 			return false;
 		}
-		
+
 		WriteFile(hFileSave, buffer.get(), size, &dwWrite, NULL);
 		CloseHandle(hFileSave);
 		hFileSave = INVALID_HANDLE_VALUE;
@@ -243,6 +243,7 @@ public:
 		return Statistics(items, true);
 	}
 
+	static void Extract(const void* lpThumbFileContent, const int size, CONST LPCTSTR lpOutputDirectory) {
 		ThumbNail obj;
 		std::vector<Wrapper>items;
 		bool status = false;
@@ -294,7 +295,7 @@ public:
 		return;
 	}
 
-	explicit ThumbNail() {
+	ThumbNail() {
 		m_hFile = INVALID_HANDLE_VALUE;
 		m_memoryBuffer = NULL;
 		m_dwMemoryBuffer = 0;
@@ -313,21 +314,21 @@ private:
 		while (filename_ptr != NULL && *filename_ptr != NULL)
 		{
 			if (*filename_ptr == L'\\' ||
-				*filename_ptr == L'/'  ||
-				*filename_ptr == L':'  ||
-				*filename_ptr == L'*'  ||
-				*filename_ptr == L'?'  ||
+				*filename_ptr == L'/' ||
+				*filename_ptr == L':' ||
+				*filename_ptr == L'*' ||
+				*filename_ptr == L'?' ||
 				*filename_ptr == L'\"' ||
-				*filename_ptr == L'<'  ||
-				*filename_ptr == L'>'  ||
-				*filename_ptr == L'|'){
+				*filename_ptr == L'<' ||
+				*filename_ptr == L'>' ||
+				*filename_ptr == L'|') {
 				*filename_ptr = L'_';
 			}
 			++filename_ptr;
 		}
 	}
-	
-	bool GetContent(DWORD offset, char *content, DWORD dwContent) {
+
+	bool GetContent(DWORD offset, char* content, DWORD dwContent) {
 		if (m_hFile != INVALID_HANDLE_VALUE) {
 			BOOL status = FALSE;
 			DWORD dwRead = 0;
@@ -351,7 +352,7 @@ private:
 		else return false;
 	}
 
-	bool GetAndCatExtension(const char *buffer, wchar_t *fileName, DWORD dwFileName) {
+	bool GetAndCatExtension(const char* buffer, wchar_t* fileName, DWORD dwFileName) {
 		if (buffer == NULL || fileName == NULL || dwFileName <= 0) {
 			return false;
 		}
@@ -381,7 +382,7 @@ private:
 		memset(dbCacheEntry, 0, sizeof(DB_CACHE_ENTRY_8P));
 		unsigned int position = m_startCache;
 		for (int i = 0;; ++i) {
-			status = GetContent(position, (char *)dbCacheEntry, sizeof(DB_CACHE_ENTRY_8P));
+			status = GetContent(position, (char*)dbCacheEntry, sizeof(DB_CACHE_ENTRY_8P));
 			if (status == false) {
 				delete[] dbCacheEntry;
 				dbCacheEntry = NULL;
@@ -392,76 +393,13 @@ private:
 				break;
 			}
 			if (dbCacheEntry->dwData > 8) {
-				
+
 				if (needSave) {
 					wchar_t fileName[MAX_PATH] = { 0 };
 					unsigned int dwFileName = dbCacheEntry->dwFilename;
 					unsigned int dwDataSize = dbCacheEntry->dwData;
 					unsigned int dwPadding = dbCacheEntry->dwPadding;
 					unsigned int subPosition = position + dwPadding + sizeof(DB_CACHE_ENTRY_8P);
-
-					status = GetContent(subPosition, (char *)fileName, dwFileName);
-					if (status == false) {
-						break;
-					}
-					char buffer[9] = { 0 };
-					status = GetContent(subPosition + dwFileName, buffer, 8);
-					if (status == false) {
-						break;
-					}
-					status = GetAndCatExtension(buffer, fileName, dwFileName);
-					if (status == false) {
-						break;
-					}
-					Wrapper item(subPosition + dwFileName, dwDataSize, fileName, dwFileName);
-					items.emplace_back(item);
-				}
-				else {
-					m_count++;
-				}
-				
-				position += dbCacheEntry->dwCacheEntry;
-				memset(dbCacheEntry, 0, sizeof(DB_CACHE_ENTRY_8P));
-				continue;
-			}
-			position += dbCacheEntry->dwCacheEntry;
-			
-		}
-
-		if (dbCacheEntry != NULL) {
-			delete[] dbCacheEntry;
-			dbCacheEntry = NULL;
-		}
-		return true;
-	}
-	
-	bool StatisticsWin7(std::vector<Wrapper>& items, bool needSave = false) {
-		bool status = false;
-		PDB_CACHE_ENTRY_7 dbCacheEntry = NULL;
-		dbCacheEntry = (PDB_CACHE_ENTRY_7)new char[sizeof(PDB_CACHE_ENTRY_7)];
-		if (dbCacheEntry == NULL) {
-			return false;
-		}
-		memset(dbCacheEntry, 0, sizeof(PDB_CACHE_ENTRY_7));
-		unsigned int position = m_startCache;
-		for (int i = 0;; ++i) {
-			status = GetContent(position, (char*)dbCacheEntry, sizeof(PDB_CACHE_ENTRY_7));
-			if (status == false) {
-				delete[] dbCacheEntry;
-				dbCacheEntry = NULL;
-				break;
-			}
-			status = (memcmp(dbCacheEntry->magicIdentifier, DB_MAGIC_ID, 4) == 0);
-			if (status == false) {
-				break;
-			}
-			if (dbCacheEntry->dwData > 8) {
-				if (needSave) {
-					wchar_t fileName[MAX_PATH] = { 0 };
-					unsigned int dwFileName = dbCacheEntry->dwFilename;
-					unsigned int dwDataSize = dbCacheEntry->dwData;
-					unsigned int dwPadding = dbCacheEntry->dwPadding;
-					unsigned int subPosition = position + dwPadding + sizeof(PDB_CACHE_ENTRY_7);
 
 					status = GetContent(subPosition, (char*)fileName, dwFileName);
 					if (status == false) {
@@ -484,7 +422,70 @@ private:
 				}
 
 				position += dbCacheEntry->dwCacheEntry;
-				memset(dbCacheEntry, 0, sizeof(PDB_CACHE_ENTRY_7));
+				memset(dbCacheEntry, 0, sizeof(DB_CACHE_ENTRY_8P));
+				continue;
+			}
+			position += dbCacheEntry->dwCacheEntry;
+
+		}
+
+		if (dbCacheEntry != NULL) {
+			delete[] dbCacheEntry;
+			dbCacheEntry = NULL;
+		}
+		return true;
+	}
+
+	bool StatisticsWin7(std::vector<Wrapper>& items, bool needSave = false) {
+		bool status = false;
+		PDB_CACHE_ENTRY_7 dbCacheEntry = NULL;
+		dbCacheEntry = (PDB_CACHE_ENTRY_7)new char[sizeof(DB_CACHE_ENTRY_7)];
+		if (dbCacheEntry == NULL) {
+			return false;
+		}
+		memset(dbCacheEntry, 0, sizeof(DB_CACHE_ENTRY_7));
+		unsigned int position = m_startCache;
+		for (int i = 0;; ++i) {
+			status = GetContent(position, (char*)dbCacheEntry, sizeof(DB_CACHE_ENTRY_7));
+			if (status == false) {
+				delete[] dbCacheEntry;
+				dbCacheEntry = NULL;
+				break;
+			}
+			status = (memcmp(dbCacheEntry->magicIdentifier, DB_MAGIC_ID, 4) == 0);
+			if (status == false) {
+				break;
+			}
+			if (dbCacheEntry->dwData > 8) {
+				if (needSave) {
+					wchar_t fileName[MAX_PATH] = { 0 };
+					unsigned int dwFileName = dbCacheEntry->dwFilename;
+					unsigned int dwDataSize = dbCacheEntry->dwData;
+					unsigned int dwPadding = dbCacheEntry->dwPadding;
+					unsigned int subPosition = position + dwPadding + sizeof(DB_CACHE_ENTRY_7);
+
+					status = GetContent(subPosition, (char*)fileName, dwFileName);
+					if (status == false) {
+						break;
+					}
+					char buffer[9] = { 0 };
+					status = GetContent(subPosition + dwFileName, buffer, 8);
+					if (status == false) {
+						break;
+					}
+					status = GetAndCatExtension(buffer, fileName, dwFileName);
+					if (status == false) {
+						break;
+					}
+					Wrapper item(subPosition + dwFileName, dwDataSize, fileName, dwFileName);
+					items.push_back(item);
+				}
+				else {
+					m_count++;
+				}
+
+				position += dbCacheEntry->dwCacheEntry;
+				memset(dbCacheEntry, 0, sizeof(DB_CACHE_ENTRY_7));
 				continue;
 			}
 			position += dbCacheEntry->dwCacheEntry;
@@ -507,7 +508,7 @@ private:
 		}
 	}
 
-	bool CreateOutputDir(CONST LPCTSTR outputPath) {
+	bool CreateOutputDir(LPCTSTR outputPath) {
 		if (::GetFileAttributesW(outputPath) == INVALID_FILE_ATTRIBUTES) {
 			return ::SHCreateDirectoryExW(NULL, outputPath, NULL) == ERROR_SUCCESS;
 		}
